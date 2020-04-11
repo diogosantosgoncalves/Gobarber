@@ -5,6 +5,7 @@ import User from '../models/User';
 import Appointment from '../models/Appointment';
 import File from '../models/File';
 import Notification from '../schemas/Notification';
+import Mail from '../../lib/Mail';
 
 class AppointmentController {
   async index(req, res) {
@@ -100,7 +101,20 @@ class AppointmentController {
   }
 
   async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
+    const appointment = await Appointment.findByPk(req.params.id, {
+      include: [
+        {
+          model: User,
+          as: 'provider',
+          attributes: ['name', 'email'],
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['name'],
+        },
+      ],
+    });
 
     if (appointment.canceled_at) {
       return res.status(401).json({ error: 'this appointment is canceled' });
@@ -109,7 +123,7 @@ class AppointmentController {
     if (appointment.user_id !== req.userId) {
       return res
         .status(401)
-        .json({ error: 'only provider can load notification' });
+        .json({ error: 'You Dont have permission to cancel this appointment' });
     }
 
     const dateWithSub = subHours(appointment.date, 2);
@@ -123,6 +137,18 @@ class AppointmentController {
 
     await appointment.save();
 
+    await Mail.sendMail({
+      to: `${appointment.provider.name} <${appointment.provider.email}>`,
+      subject: 'Agendamento Cancelado',
+      template: 'cancellation',
+      context: {
+        provider: appointment.provider.name,
+        user: appointment.user.name,
+        date: format(appointment.date, "'dia' dd 'de' MMMM',' às' 'H:mm'h'", {
+          locale: pt,
+        }),
+      },
+    });
     return res.json(appointment);
   }
 }
